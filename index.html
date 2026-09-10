@@ -85,6 +85,10 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;bac
 .dayrow.weekend{background:var(--md-surface-container)}
 .dayrow.holiday{background:#FDECEC}
 .dayrow.meeting{background:#EAF0FF;box-shadow:inset 3px 0 0 var(--md-primary)}
+.slot.full{grid-column:2 / -1;display:flex;align-items:center;justify-content:center;gap:8px;
+  height:42px;border-radius:var(--shape-full);background:#F0A0A0;border:1px solid #E08080;
+  color:#5A1212;font-weight:700;font-size:15px;letter-spacing:.5px}
+.slot.full small{font-weight:500;font-size:12px;opacity:.8}
 .dayrow.today{border-color:var(--md-primary)}
 .dayrow.empty{border-style:dashed;border-color:var(--md-outline)}
 .daylabel{text-align:center;line-height:1.25}
@@ -103,6 +107,7 @@ input.cd{max-width:104px;flex:none;cursor:text}
   .dayrow{grid-template-columns:70px 1fr;grid-template-areas:'d am' 'd pm';row-gap:6px}
   .daylabel{grid-area:d}
   .slot-am{grid-area:am}.slot-pm{grid-area:pm}
+  .slot.full{grid-column:2;grid-row:1 / span 2;grid-area:auto}
   .hero .emoji{display:none}
 }
 
@@ -560,13 +565,23 @@ function renderDays(){
   $('#fabWrap').classList.remove('hide');
   const n = daysIn(month);
   const mdays = meetingDays();
+  let dirty = false;
   const today = new Date();
   const isThis = today.getFullYear()===ROC_YEAR+1911 && today.getMonth()+1===month;
   let h='';
   for(let d=1; d<=n; d++){
-    const c = cell(d), wk = isWknd(month,d), hd = !!holidayOf(month,d), mt = mdays.includes(d);
+    const c = cell(d), wk = isWknd(month,d), hn = holidayOf(month,d), mt = mdays.includes(d);
+    if(hn){
+      // 國定假日一律放整天，不分上下午
+      if(c.am !== hn || c.pm !== 'off'){ c.am = hn; c.pm = 'off'; dirty = true; }
+      h += `<div class="dayrow holiday" data-d="${d}">
+        ${dayLabelHTML(d)}
+        <div class="slot full">🎌 ${hn}　<small>全日休假</small></div>
+      </div>`;
+      continue;
+    }
     const filled = c.am || c.pm;
-    h += `<div class="dayrow${hd?' holiday':(mt?' meeting':(wk?' weekend':''))}${filled?'':' empty'}${isThis&&today.getDate()===d?' today':''}" data-d="${d}">
+    h += `<div class="dayrow${mt?' meeting':(wk?' weekend':'')}${filled?'':' empty'}${isThis&&today.getDate()===d?' today':''}" data-d="${d}">
       ${dayLabelHTML(d)}
       ${slotHTML(d,'am',c.am)}
       ${slotHTML(d,'pm',c.pm)}
@@ -575,6 +590,7 @@ function renderDays(){
   box.innerHTML = h;
   box.querySelectorAll('select.cell').forEach(s=>s.addEventListener('change', onCellChange));
   box.querySelectorAll('input.cd').forEach(i=>i.addEventListener('input', onCdInput));
+  if(dirty) queueSaveMine();
   renderStats();
 }
 /* 從本月活動事項中找出「教學品管科部助理會議」的日期（12:30 開會） */

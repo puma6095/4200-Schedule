@@ -297,7 +297,7 @@ table.status td:last-child{text-align:right}
 
       <div class="card">
         <div class="card-title">📌 本月活動事項</div>
-        <p class="hint" style="margin-bottom:8px">一行一則，最多 7 則，會填入 Excel 標題下方（例：8/17【教學部部務會議】）。</p>
+        <p class="hint" style="margin-bottom:8px">一行一則，最多 10 則，會填入 Excel 標題下方（例：8/17【教學部部務會議】）。</p>
         <textarea class="ta" id="taEvents" placeholder="8/17【教學部部務會議】"></textarea>
         <div class="row" style="margin-top:10px">
           <button class="btn btn-filled btn-sm" id="btnSaveEvents">儲存活動</button>
@@ -360,6 +360,7 @@ const HOLIDAYS = {
   '12-25':'行憲紀念日'
 };
 const XLFONT = 'Microsoft JhengHei';
+const MAX_EVENTS  = 10;  // 本月重要活動可輸入的行數上限
 const MIN_ON_DUTY = 8;   // 平日在班人數低於此值即標紅提醒
 /* ═══════════════════════════════════════════════════════════ */
 
@@ -854,9 +855,11 @@ function renderAdmin(){
 /* ── Excel 匯出 ── */
 function buildSheet(wb, m, md){
   const n = daysIn(m), last = 2 + n;               // A,B + 天數
+  const evs = (md.events || []).slice(0, MAX_EVENTS);
+  const HR  = Math.max(evs.length, 7) + 2;   // 表頭列：活動 7 則以內維持第 9 列，超過則往下移
   const ws = wb.addWorksheet(`${m}月`, {
     pageSetup:{orientation:'landscape', paperSize:9, fitToPage:true, fitToWidth:1, fitToHeight:0, margins:{left:.3,right:.3,top:.4,bottom:.4,header:.2,footer:.2}},
-    views:[{state:'frozen', xSplit:2, ySplit:9}]
+    views:[{state:'frozen', xSplit:2, ySplit:HR}]
   });
   const F = (size=14, bold=false, red=false) => ({name:XLFONT, size, bold, color:{argb: red?'FFFF0000':'FF000000'}});
   const C = {horizontal:'center', vertical:'middle', wrapText:true};
@@ -874,7 +877,7 @@ function buildSheet(wb, m, md){
   t.font = F(18,true); t.alignment = C; ws.getRow(1).height = 32.25;
 
   // 活動事項（第 2–8 列，A:J 合併）
-  (md.events||[]).slice(0,7).forEach((ev,i)=>{
+  evs.forEach((ev,i)=>{
     const r = 2+i;
     ws.mergeCells(r,1,r,10);
     const c = ws.getCell(r,1);
@@ -888,9 +891,9 @@ function buildSheet(wb, m, md){
     });
 
   // 表頭（第 9 列）
-  const hr = ws.getRow(9); hr.height = 75;
+  const hr = ws.getRow(HR); hr.height = 75;
   const setH = (col,val,wknd) => {
-    const c = ws.getCell(9,col);
+    const c = ws.getCell(HR,col);
     c.value = val; c.font = F(14); c.alignment = C; c.border = B;
     c.fill = fillOf(wknd ? 'D8D8D8' : 'FFFFFF');
   };
@@ -899,7 +902,7 @@ function buildSheet(wb, m, md){
 
   // 資料列
   (md.roster||roster).forEach((p,idx)=>{
-    const r0 = 10 + idx*2;
+    const r0 = HR + 1 + idx*2;
     ws.mergeCells(r0,1,r0+1,1);
     const nc = ws.getCell(r0,1);
     nc.value = `${p.id}\n${p.name}`; nc.font = F(14); nc.alignment = C; nc.border = B;
@@ -1175,11 +1178,11 @@ async function init(){
     if(!ev.length) return toast(`${pm} 月沒有活動事項可複製`);
     const cur = $('#taEvents').value.split('\n').map(x=>x.trim()).filter(Boolean);
     const add = ev.map(e => shiftEventMonth(e, pm, month)).filter(e => !cur.includes(e));
-    $('#taEvents').value = [...cur, ...add].slice(0,7).join('\n');
+    $('#taEvents').value = [...cur, ...add].slice(0,MAX_EVENTS).join('\n');
     toast(`已帶入 ${pm} 月的 ${add.length} 則活動，請確認日期後按儲存`); };
 
   $('#btnSaveEvents').onclick = async ()=>{
-    const ev = $('#taEvents').value.split('\n').map(x=>x.trim()).filter(Boolean).slice(0,7);
+    const ev = $('#taEvents').value.split('\n').map(x=>x.trim()).filter(Boolean).slice(0,MAX_EVENTS);
     await saveAdminField({events:ev});
     renderEvents(); renderDays(); markProgress();
     const md = meetingDays();

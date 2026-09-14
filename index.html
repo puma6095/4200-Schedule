@@ -1036,8 +1036,13 @@ function switchView(v){
 }
 
 /* ── 初始化 ── */
+let loadSeq = 0;
 async function refreshAll(){
-  await loadMonth(month);
+  const seq = ++loadSeq, m = month;
+  setLoading(true);
+  await loadMonth(m);
+  if(seq !== loadSeq) return;          // 使用者已切到別的月份，放棄這次繪製
+  setLoading(false);
   $('#mineMonthLabel').textContent = `${month} 月`;
   renderEvents(); renderDays(); markProgress();
   if(!$('#view-all').classList.contains('hide')) renderGrid();
@@ -1047,6 +1052,13 @@ function fillRosterSelect(){
   const sel = $('#selMe');
   sel.innerHTML = '<option value="">請選擇姓名</option>' +
     roster.map(r=>`<option value="${r.id}"${r.id===me?' selected':''}>${r.name}</option>`).join('');
+}
+function setLoading(on){
+  const el = $('#modeChip'); if(!el) return;
+  if(on){
+    el.textContent = '⏳ 載入中…';
+    el.style.background = '#FFE3C2'; el.style.color = '#6B3A00';
+  } else paintModeChip();
 }
 function paintModeChip(){
   const el = $('#modeChip'); if(!el) return;
@@ -1077,8 +1089,6 @@ async function init(){
   const ms = $('#selMonth');
   ms.innerHTML = Array.from({length:12},(_,i)=>`<option value="${i+1}"${i+1===month?' selected':''}>${i+1} 月</option>`).join('');
   paintModeChip();
-  await loadRoster(); fillRosterSelect();
-  await refreshAll();
 
   ms.onchange = async e => { month = +e.target.value; await refreshAll(); };
   $('#selMe').onchange = async e => { me = e.target.value; renderDays(); markProgress(); switchViewKeep(); };
@@ -1229,6 +1239,10 @@ async function init(){
     r.style.left = (e.clientX-b.left-size/2)+'px'; r.style.top = (e.clientY-b.top-size/2)+'px';
     el.appendChild(r); setTimeout(()=>r.remove(),500);
   });
+  // 所有按鈕繫結完成後才開始載入資料
+  await loadRoster(); fillRosterSelect();
+  await refreshAll();
+
   if(MODE === 'local')  toast('提示：目前為本機模式，資料只存在這台電腦的瀏覽器');
   if(MODE === 'memory') toast('⚠️ 無法保存資料，請用「下載備份檔」留存');
 }

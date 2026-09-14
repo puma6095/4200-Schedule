@@ -579,7 +579,6 @@ async function saveMine(){
   if(data.done[me]) fresh.done[me] = data.done[me]; else delete fresh.done[me];
   await sset(mKey(month), fresh);
   data = fresh;
-  return true;
 }
 async function saveAdminField(patch){
   const fresh = await readMonthSafe(month);
@@ -588,6 +587,7 @@ async function saveAdminField(patch){
   fresh.shifts = fresh.shifts||{}; fresh.done = fresh.done||{}; fresh.saved = fresh.saved||{};
   await sset(mKey(month), fresh);
   data = fresh;
+  return true;
 }
 
 /* ── 我的班表 ── */
@@ -1214,7 +1214,8 @@ async function init(){
     const ev = $('#taEvents').value.split('\n').map(x=>x.trim()).filter(Boolean).slice(0,MAX_EVENTS);
     const ok = await saveAdminField({events:ev});
     if(!ok) return;
-    renderEvents(); renderDays(); markProgress();
+    renderEvents();
+    if(me){ renderDays(); markProgress(); }
     const md = meetingDays();
     toast(md.length ? `活動事項已儲存，已標記 ${md.length} 個教學品管會議日` : '活動事項已儲存'); };
   $('#btnSaveRoster').onclick = async ()=>{

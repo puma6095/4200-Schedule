@@ -434,24 +434,41 @@ const MODE_LABEL = {
   memory: '暫存（重新整理即消失）'
 };
 
+/* 回傳值語意：
+     物件／null = 讀取成功（null 代表這個 key 還沒有資料）
+     undefined  = 讀取失敗（連線問題），呼叫端「絕對不可以」當成空資料去覆寫  */
 async function sget(key){
-  try{
-    if(MODE === 'cloud'){
+  if(MODE === 'cloud'){
+    try{
       const r = await window.storage.get(key, true);
       return r ? JSON.parse(r.value) : null;
+    }catch(e){ return (key in mem) ? mem[key] : undefined; }
+  }
+  if(MODE === 'remote'){
+    for(let i = 0; i < 3; i++){                      // Apps Script 偶爾逾時，重試三次
+      try{
+        const r = await fetch(`${REMOTE_URL}?key=${encodeURIComponent(key)}`);
+        if(!r.ok) throw new Error('HTTP ' + r.status);
+        const j = await r.json();
+        if(j && j.error) throw new Error(j.error);
+        return (j && j.value) ? JSON.parse(j.value) : null;
+      }catch(e){ await new Promise(z => setTimeout(z, 600 * (i + 1))); }
     }
-    if(MODE === 'remote'){
-      const r = await fetch(`${REMOTE_URL}?key=${encodeURIComponent(key)}`);
-      const j = await r.json();
-      return (j && j.value) ? JSON.parse(j.value) : null;
-    }
-    if(MODE === 'local'){
-      const v = localStorage.getItem(key);
-      return v ? JSON.parse(v) : null;
-    }
-  }catch(e){ /* 讀取失敗時退回本次瀏覽的暫存 */ }
+    return (key in mem) ? mem[key] : undefined;      // 三次都失敗
+  }
+  if(MODE === 'local'){
+    try{ const v = localStorage.getItem(key); return v ? JSON.parse(v) : null; }
+    catch(e){ return undefined; }
+  }
   return (key in mem) ? mem[key] : null;
 }
+/* 取得當月資料；undefined 代表讀取失敗，呼叫端必須中止寫入 */
+async function readMonthSafe(m){
+  const r = await sget(mKey(m));
+  if(r === undefined) return undefined;
+  return r || blankMonth();
+}
+const READ_FAIL_MSG = '⚠️ 讀取失敗，為避免覆蓋他人資料已暫停存檔，請稍後再試';
 
 async function sset(key, val){
   mem[key] = val;
@@ -529,10 +546,18 @@ function applyHolidays(md, m){
   return keys.length;
 }
 async function loadMonth(m){
-  data = (await sget(mKey(m))) || null;
-  if(!data || !data.shifts || !Object.keys(data.shifts).length){
-    const sd = seedOf(m);
-    if(sd){ data = sd; await sset(mKey(m), data); }
+  const got = await sget(mKey(m));
+  if(got === undefined){
+    // 讀不到後端資料：僅在畫面上暫用舊檔，絕不寫回，以免蓋掉雲端既有資料
+    data = seedOf(m) || blankMonth();
+    data.__readFailed = true;
+    toast('⚠️ 讀取後端資料失敗，目前顯示的是離線內容，請重新整理');
+  } else {
+    data = got;
+    if(!data || !data.shifts || !Object.keys(data.shifts).length){
+      const sd = seedOf(m);
+      if(sd){ data = sd; await sset(mKey(m), data); }
+    }
   }
   if(!data) data = blankMonth();
   if(!data.shifts) data.shifts={}; if(!data.done) data.done={}; if(!data.events) data.events=[]; if(!data.saved) data.saved={};
@@ -545,16 +570,20 @@ function queueSaveMine(){
 }
 async function saveMine(){
   if(!me) return;
-  const fresh = (await sget(mKey(month))) || blankMonth();
+  if(data.__readFailed){ toast(READ_FAIL_MSG); return; }
+  const fresh = await readMonthSafe(month);
+  if(fresh === undefined){ toast(READ_FAIL_MSG); return; }
   fresh.shifts = fresh.shifts||{}; fresh.done = fresh.done||{}; fresh.saved = fresh.saved||{}; fresh.events = fresh.events||data.events;
   fresh.shifts[me] = data.shifts[me];
   fresh.saved[me] = stamp();
   if(data.done[me]) fresh.done[me] = data.done[me]; else delete fresh.done[me];
   await sset(mKey(month), fresh);
   data = fresh;
+  return true;
 }
 async function saveAdminField(patch){
-  const fresh = (await sget(mKey(month))) || blankMonth();
+  const fresh = await readMonthSafe(month);
+  if(fresh === undefined){ toast(READ_FAIL_MSG); return false; }
   Object.assign(fresh, patch);
   fresh.shifts = fresh.shifts||{}; fresh.done = fresh.done||{}; fresh.saved = fresh.saved||{};
   await sset(mKey(month), fresh);
@@ -1183,7 +1212,8 @@ async function init(){
 
   $('#btnSaveEvents').onclick = async ()=>{
     const ev = $('#taEvents').value.split('\n').map(x=>x.trim()).filter(Boolean).slice(0,MAX_EVENTS);
-    await saveAdminField({events:ev});
+    const ok = await saveAdminField({events:ev});
+    if(!ok) return;
     renderEvents(); renderDays(); markProgress();
     const md = meetingDays();
     toast(md.length ? `活動事項已儲存，已標記 ${md.length} 個教學品管會議日` : '活動事項已儲存'); };
@@ -1194,7 +1224,8 @@ async function init(){
     if(!rs.length) return toast('名單格式有誤');
     roster = rs; await sset(RKEY, roster); fillRosterSelect(); renderAdmin(); toast('人員名單已儲存'); };
   $('#btnHoliday').onclick = async ()=>{
-    const fresh = (await sget(mKey(month))) || blankMonth();
+    const fresh = await readMonthSafe(month);
+    if(fresh === undefined) return toast(READ_FAIL_MSG);
     fresh.shifts = fresh.shifts || {}; fresh.done = fresh.done || {}; fresh.saved = fresh.saved || {};
     roster.forEach(p=>{ fresh.shifts[p.id] = fresh.shifts[p.id] || {}; });
     const n = applyHolidays(fresh, month);
@@ -1204,7 +1235,8 @@ async function init(){
     toast(`✅ 已套用 ${n} 天國定假日至全體同仁`); };
 
   $('#btnWeekend').onclick = async ()=>{
-    const fresh = (await sget(mKey(month))) || blankMonth();
+    const fresh = await readMonthSafe(month);
+    if(fresh === undefined) return toast(READ_FAIL_MSG);
     fresh.shifts = fresh.shifts || {}; fresh.done = fresh.done || {}; fresh.saved = fresh.saved || {};
     roster.forEach(p=>{ fresh.shifts[p.id] = fresh.shifts[p.id] || {}; });
     const k = normalizeWeekends(fresh, month);

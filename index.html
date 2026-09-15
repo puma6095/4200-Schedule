@@ -452,7 +452,7 @@ async function sget(key){
         const j = await r.json();
         if(j && j.error) throw new Error(j.error);
         return (j && j.value) ? JSON.parse(j.value) : null;
-      }catch(e){ await new Promise(z => setTimeout(z, 600 * (i + 1))); }
+      }catch(e){ await new Promise(z => setTimeout(z, 400 * (i + 1))); }
     }
     return (key in mem) ? mem[key] : undefined;      // 三次都失敗
   }
@@ -468,6 +468,43 @@ async function readMonthSafe(m){
   if(r === undefined) return undefined;
   return r || blankMonth();
 }
+let BACKEND_VER = 1;                      // 2 以上支援局部更新
+async function probeBackend(){
+  if(MODE !== 'remote'){ BACKEND_VER = 9; return; }
+  try{
+    const r = await fetch(`${REMOTE_URL}?op=ver`);
+    const j = await r.json();
+    BACKEND_VER = (j && j.ver) ? j.ver : 1;
+  }catch(e){ BACKEND_VER = 1; }
+}
+/* 只送出異動的部分，由後端合併：省一次讀取往返，也不會覆蓋他人資料 */
+async function spatch(key, patch){
+  if(MODE === 'remote' && BACKEND_VER >= 2){
+    try{
+      const r = await fetch(REMOTE_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
+        body: JSON.stringify({key, merge: patch})});
+      const j = await r.json();
+      if(j && j.ok) return true;
+    }catch(e){ /* 落到下方的完整讀改寫 */ }
+  }
+  const cur = await sget(key);
+  if(cur === undefined) return false;
+  const base = cur || blankMonth();
+  mergeInto(base, patch);
+  await sset(key, base);
+  if(key === mKey(month)) data = base;
+  return true;
+}
+function mergeInto(base, patch){
+  Object.keys(patch).forEach(k=>{
+    const v = patch[k];
+    if(v && typeof v === 'object' && !Array.isArray(v)){
+      if(!base[k] || typeof base[k] !== 'object' || Array.isArray(base[k])) base[k] = {};
+      mergeInto(base[k], v);
+    } else base[k] = v;
+  });
+}
+
 const READ_FAIL_MSG = '⚠️ 讀取失敗，為避免覆蓋他人資料已暫停存檔，請稍後再試';
 
 async function sset(key, val){
@@ -566,28 +603,34 @@ async function loadMonth(m){
 let saveTimer=null;
 function queueSaveMine(){
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(saveMine, 700);
+  saveTimer = setTimeout(saveMine, 1200);
 }
+let saving = false, savePending = false;
 async function saveMine(){
-  if(!me) return;
-  if(data.__readFailed){ toast(READ_FAIL_MSG); return; }
-  const fresh = await readMonthSafe(month);
-  if(fresh === undefined){ toast(READ_FAIL_MSG); return; }
-  fresh.shifts = fresh.shifts||{}; fresh.done = fresh.done||{}; fresh.saved = fresh.saved||{}; fresh.events = fresh.events||data.events;
-  fresh.shifts[me] = data.shifts[me];
-  fresh.saved[me] = stamp();
-  if(data.done[me]) fresh.done[me] = data.done[me]; else delete fresh.done[me];
-  await sset(mKey(month), fresh);
-  data = fresh;
+  if(!me) return false;
+  if(data.__readFailed){ toast(READ_FAIL_MSG); return false; }
+  if(saving){ savePending = true; return false; }
+  saving = true; setSaving(true);
+  try{
+    const st = stamp();
+    data.shifts[me] = data.shifts[me] || {};
+    data.saved = data.saved || {}; data.saved[me] = st;
+    const patch = {shifts:{[me]: data.shifts[me]}, saved:{[me]: st}};
+    if(data.done[me]) patch.done = {[me]: data.done[me]};
+    return await spatch(mKey(month), patch);
+  } finally {
+    saving = false; setSaving(false);
+    if(savePending){ savePending = false; saveMine(); }
+  }
 }
 async function saveAdminField(patch){
-  const fresh = await readMonthSafe(month);
-  if(fresh === undefined){ toast(READ_FAIL_MSG); return false; }
-  Object.assign(fresh, patch);
-  fresh.shifts = fresh.shifts||{}; fresh.done = fresh.done||{}; fresh.saved = fresh.saved||{};
-  await sset(mKey(month), fresh);
-  data = fresh;
-  return true;
+  setSaving(true);
+  try{
+    const ok = await spatch(mKey(month), patch);
+    if(!ok){ toast(READ_FAIL_MSG); return false; }
+    Object.assign(data, patch);
+    return true;
+  } finally { setSaving(false); }
 }
 
 /* ── 我的班表 ── */
@@ -1068,6 +1111,12 @@ function switchView(v){
 }
 
 /* ── 初始化 ── */
+function renderMonth(){
+  $('#mineMonthLabel').textContent = `${month} 月`;
+  renderEvents(); renderDays(); markProgress();
+  if(!$('#view-all').classList.contains('hide')) renderGrid();
+  if(isAdmin) renderAdmin();
+}
 let loadSeq = 0;
 async function refreshAll(){
   const seq = ++loadSeq, m = month;
@@ -1075,15 +1124,28 @@ async function refreshAll(){
   await loadMonth(m);
   if(seq !== loadSeq) return;          // 使用者已切到別的月份，放棄這次繪製
   setLoading(false);
-  $('#mineMonthLabel').textContent = `${month} 月`;
-  renderEvents(); renderDays(); markProgress();
-  if(!$('#view-all').classList.contains('hide')) renderGrid();
-  if(isAdmin) renderAdmin();
+  renderMonth();
 }
 function fillRosterSelect(){
   const sel = $('#selMe');
   sel.innerHTML = '<option value="">請選擇姓名</option>' +
     roster.map(r=>`<option value="${r.id}"${r.id===me?' selected':''}>${r.name}</option>`).join('');
+}
+let busyCount = 0;
+function setSaving(on){
+  busyCount = Math.max(0, busyCount + (on ? 1 : -1));
+  const el = $('#modeChip'); if(!el) return;
+  if(busyCount > 0){
+    el.textContent = '💾 儲存中…';
+    el.style.background = '#FFE3C2'; el.style.color = '#6B3A00';
+  } else paintModeChip();
+}
+/* 按鈕按下後顯示處理中，避免同仁重複點擊 */
+async function withBusy(btn, label, fn){
+  const html = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = '⏳ ' + label;
+  try{ return await fn(); }
+  finally{ btn.disabled = false; btn.innerHTML = html; }
 }
 function setLoading(on){
   const el = $('#modeChip'); if(!el) return;
@@ -1147,8 +1209,12 @@ async function init(){
     data.shifts[me] = s; queueSaveMine(); renderDays(); markProgress(); toast('已複製上月常態班（假別未帶入）'); };
 
   $('#fabDraft').onclick = async ()=>{ if(!needMe())return;
-    clearTimeout(saveTimer); await saveMine(); markProgress();
-    toast(`💾 已暫存（${data.saved[me]}），下次進來會自動帶出`); };
+    clearTimeout(saveTimer);
+    await withBusy($('#fabDraft'), '暫存中…', async ()=>{
+      const ok = await saveMine();
+      markProgress();
+      toast(ok ? `💾 已暫存（${data.saved[me]}）` : '⚠️ 暫存失敗，請稍後再試');
+    }); };
 
   $('#fabSubmit').onclick = async ()=>{ if(!needMe())return;
     const n=daysIn(month), s=mine(); let f=0;
@@ -1189,7 +1255,11 @@ async function init(){
       if(!go) return;
     }
     const now = new Date(); data.done[me] = `${now.getMonth()+1}/${now.getDate()}`;
-    await saveMine(); markProgress(); toast('✅ 已送出，感謝配合！'); };
+    await withBusy($('#fabSubmit'), '送出中…', async ()=>{
+      const ok = await saveMine();
+      markProgress();
+      toast(ok ? '✅ 已送出，感謝配合！' : '⚠️ 送出失敗，請稍後再試');
+    }); };
 
   $('#btnPrint').onclick = ()=>{ renderGrid(); setTimeout(()=>window.print(), 100); };
 
@@ -1275,9 +1345,12 @@ async function init(){
     r.style.left = (e.clientX-b.left-size/2)+'px'; r.style.top = (e.clientY-b.top-size/2)+'px';
     el.appendChild(r); setTimeout(()=>r.remove(),500);
   });
-  // 所有按鈕繫結完成後才開始載入資料
-  await loadRoster(); fillRosterSelect();
-  await refreshAll();
+  // 所有按鈕繫結完成後才開始載入資料；三個請求平行發出，縮短等待
+  setLoading(true);
+  await Promise.all([probeBackend(), loadRoster(), loadMonth(month)]);
+  fillRosterSelect();
+  setLoading(false);
+  renderMonth();
 
   if(MODE === 'local')  toast('提示：目前為本機模式，資料只存在這台電腦的瀏覽器');
   if(MODE === 'memory') toast('⚠️ 無法保存資料，請用「下載備份檔」留存');

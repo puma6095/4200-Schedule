@@ -627,12 +627,24 @@ function queueSaveMine(){
   clearTimeout(saveTimer);
   saveTimer = setTimeout(saveMine, 1200);
 }
-let saving = false, savePending = false;
-async function saveMine(){
+/* 存檔排隊：同一時間只跑一次，後來的呼叫排在它後面。
+   舊版在有存檔進行中時直接回傳 false，導致「自動暫存還沒跑完就按暫存」
+   會誤報失敗（其實有存到），再按一次才成功。改為等前一次結束後真的再存一次。 */
+let saveChain = Promise.resolve(true);
+let queuedSave = null;          // 已排隊但尚未開始執行的那一次
+function saveMine(){
+  if(!me) return Promise.resolve(false);
+  if(data.__readFailed){ toast(READ_FAIL_MSG); return Promise.resolve(false); }
+  if(queuedSave) return queuedSave;        // 已有排隊中的存檔，共用同一個結果
+  const run = saveChain.then(runSaveMine, runSaveMine);
+  queuedSave = run;
+  saveChain = run.catch(()=>false);
+  return run;
+}
+async function runSaveMine(){
+  queuedSave = null;            // 開始執行，之後的呼叫要重新排隊
   if(!me) return false;
-  if(data.__readFailed){ toast(READ_FAIL_MSG); return false; }
-  if(saving){ savePending = true; return false; }
-  saving = true; setSaving(true);
+  setSaving(true);
   try{
     const st = stamp();
     data.shifts[me] = data.shifts[me] || {};
@@ -640,10 +652,9 @@ async function saveMine(){
     const patch = {shifts:{[me]: data.shifts[me]}, saved:{[me]: st}};
     if(data.done[me]) patch.done = {[me]: data.done[me]};
     return await spatch(mKey(month), patch);
-  } finally {
-    saving = false; setSaving(false);
-    if(savePending){ savePending = false; saveMine(); }
-  }
+  } catch(e){
+    return false;
+  } finally { setSaving(false); }
 }
 async function saveAdminField(patch){
   setSaving(true);
@@ -1506,8 +1517,8 @@ async function init(){
     clearTimeout(saveTimer);
     await withBusy($('#fabDraft'), '暫存中…', async ()=>{
       const ok = await saveMine();
-      markProgress();
-      toast(ok ? `💾 已暫存（${data.saved[me]}）` : '⚠️ 暫存失敗，請稍後再試');
+      markProgress(); renderCompBox();
+      toast(ok ? `💾 已暫存（${(data.saved||{})[me]||stamp()}）` : '⚠️ 暫存失敗，請確認網路後再試');
     }); };
 
   $('#fabSubmit').onclick = async ()=>{ if(!needMe())return;

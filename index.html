@@ -97,11 +97,23 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;bac
 .badge-ok{background:var(--md-primary-container);color:var(--md-on-primary-container);border-radius:999px;padding:3px 12px;font-size:12px;font-weight:700;white-space:nowrap}
 .badge-no{background:#FFDAD6;color:#7A1420;border-radius:999px;padding:3px 12px;font-size:12px;font-weight:700;white-space:nowrap}
 .badge-late{background:#FFE0B2;color:#7A4A00;border-radius:999px;padding:3px 12px;font-size:12px;font-weight:700;white-space:nowrap}
-.asgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:4px;max-height:38vh;overflow:auto;padding:6px;border:1px solid var(--md-outline);border-radius:var(--shape-md)}
-.ascell{display:flex;align-items:center;gap:9px;padding:7px 10px;border-radius:var(--shape-md);cursor:pointer;font-size:14px;line-height:1.25}
+.asrow{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:10px;align-items:start}
+.asrow > label{min-width:0}
+.asrow select.cell{width:100%}
+.aslab{font-size:12px;font-weight:600;color:var(--md-on-surface-variant);margin-bottom:4px}
+.ashrs{margin-top:10px;font-size:13px;padding:8px 14px;border-radius:var(--shape-full);display:inline-block}
+.ashrs.full{background:#FFF4E2;color:#7A4A00;border:1px solid #F0C98A}
+.ashrs.part{background:var(--md-surface-container);color:var(--md-on-surface-variant)}
+.asgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:2px;max-height:34vh;
+  overflow-y:auto;overflow-x:hidden;padding:6px;border:1px solid var(--md-outline);border-radius:var(--shape-md)}
+.ascell{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:var(--shape-md);
+  cursor:pointer;font-size:14px;line-height:1.3;min-width:0}
 .ascell:hover{background:var(--md-surface-container)}
-.ascell input{width:18px;height:18px;flex:none;accent-color:var(--md-primary);cursor:pointer}
-.ascell small{color:var(--md-on-surface-variant);font-size:11px}
+.ascell input[type="checkbox"]{width:18px;height:18px;flex:none;margin:0;padding:0;
+  border-radius:4px;accent-color:var(--md-primary);cursor:pointer}
+.ascell .nm{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ascell small{color:var(--md-on-surface-variant);font-size:11px;margin-left:auto;white-space:nowrap;flex:none}
+@media(max-width:520px){.asrow{grid-template-columns:1fr 1fr}.asrow > label:first-child{grid-column:1 / -1}}
 .asgnote{font-size:12px;color:var(--md-on-surface-variant);margin-top:2px}
 .picklist{max-height:44vh;overflow:auto;border:1px solid var(--md-outline);border-radius:var(--shape-md);padding:6px}
 .pickrow{display:flex;width:100%;align-items:center;gap:10px;justify-content:space-between;
@@ -181,7 +193,7 @@ table.status td:last-child{text-align:right}
 .mask{position:fixed;inset:0;background:rgba(0,30,16,.4);display:grid;place-items:center;z-index:200;padding:20px}
 .modal{background:#fff;border-radius:var(--shape-lg);padding:24px;max-width:400px;width:100%;box-shadow:var(--elev-2)}
 .modal h3{font-size:18px;margin-bottom:6px}
-.modal input{width:100%;height:44px;border-radius:var(--shape-full);border:1px solid var(--md-outline);padding:0 16px;font:inherit;margin:14px 0;outline:none}
+.modal input:not([type="checkbox"]){width:100%;height:44px;border-radius:var(--shape-full);border:1px solid var(--md-outline);padding:0 16px;font:inherit;margin:14px 0;outline:none}
 .modal input:focus{border-color:var(--md-primary)}
 .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:#1A1C1A;color:#fff;padding:11px 22px;border-radius:var(--shape-full);font-size:14px;z-index:300;box-shadow:var(--elev-2);opacity:0;transition:.25s;pointer-events:none}
 .toast.on{opacity:1;bottom:34px}
@@ -784,9 +796,24 @@ function inWindow(w, m, d){
   const x = dateOf(m,d), wd = x.getDay();
   return wd >= 1 && wd <= 5 && x >= w.start && x <= w.end;
 }
-/* 上下午都排了時段班別 → 視為出勤滿八小時 */
-function isFullDuty(c){
-  return /^[0-9]/.test((c && c.am) || '') && /^[0-9]/.test((c && c.pm) || '');
+/* 時數換算：' 代表半小時；1~6 視為下午，同時支援 12'-17 這種二十四小時寫法 */
+function rangeHours(v){
+  const m = String(v || '').trim().match(/^(\d{1,2})('?)\s*-\s*(\d{1,2})('?)$/);
+  if(!m) return 0;
+  let a = +m[1] + (m[2] ? .5 : 0);
+  let b = +m[3] + (m[4] ? .5 : 0);
+  if(a <= 6.5) a += 12;
+  if(b <= 6.5) b += 12;
+  if(b <= a)   b += 12;
+  return Math.max(0, b - a);
+}
+function dutyHours(c){ return c ? rangeHours(c.am) + rangeHours(c.pm) : 0; }
+const FULL_DAY_HOURS = 8;
+/* 滿八小時（含）才需挪移補休 */
+function isFullDuty(c){ return dutyHours(c) >= FULL_DAY_HOURS - 0.001; }
+/* 當天有任何出勤時段（含未滿八小時），用於避免被「套用標準班」覆蓋 */
+function hasWeekendWork(c){
+  return /^[0-9]/.test((c && c.am) || '') || /^[0-9]/.test((c && c.pm) || '');
 }
 
 /* 跨月資料快取（唯讀，僅供補休比對） */
@@ -1433,36 +1460,41 @@ function openAssignDialog(){
   const days = weekendDaysOfMonth();
   if(!days.length) return toast('本月沒有可安排的週六／週日');
   const meName = (roster.find(r=>r.id===me)||{}).name || '';
+  const numOpts = arr => arr.filter(x=>/^[0-9]/.test(x));
+
+  const slotSel = (id, arr, def) => `
+    <select class="cell" id="${id}">
+      <option value="off">不出勤</option>
+      ${numOpts(arr).map(x=>`<option value="${x}"${x===def?' selected':''}>${x}</option>`).join('')}
+      <option value="__custom">✎ 其他（自行輸入）</option>
+    </select>
+    <input class="cell" id="${id}C" style="display:none;margin-top:6px;cursor:text" placeholder="例：9-12、10'-1'">`;
 
   const mask = document.createElement('div');
   mask.className = 'mask';
-  mask.innerHTML = `<div class="modal" style="max-width:540px">
+  mask.innerHTML = `<div class="modal" style="max-width:560px;max-height:88vh;overflow:auto">
     <h3>📋 安排假日出勤</h3>
     <p class="hint" style="margin:6px 0 14px">
-      勾選當天需出勤的同仁，系統會直接寫入他們的班表；他們登入後會看到挪移補休提醒。</p>
-    <div class="row" style="gap:10px;margin-bottom:10px">
-      <label style="flex:1;min-width:150px">
-        <div class="hint" style="margin-bottom:4px">出勤日期</div>
+      勾選當天需出勤的同仁，系統會直接寫入他們的班表。滿八小時者，登入後會看到挪移補休提醒。</p>
+
+    <div class="asrow">
+      <label><div class="aslab">出勤日期</div>
         <select class="cell" id="_aD">${days.map(d=>
-          `<option value="${d}">${month}/${d}（週${WD[wdOf(month,d)]}）</option>`).join('')}</select>
-      </label>
-      <label style="width:120px">
-        <div class="hint" style="margin-bottom:4px">上午</div>
-        <select class="cell" id="_aAM">${AM_OPTS.filter(x=>/^[0-9]/.test(x)).map(x=>
-          `<option value="${x}"${x==='8-12'?' selected':''}>${x}</option>`).join('')}</select>
-      </label>
-      <label style="width:120px">
-        <div class="hint" style="margin-bottom:4px">下午</div>
-        <select class="cell" id="_aPM">${PM_OPTS.filter(x=>/^[0-9]/.test(x)).map(x=>
-          `<option value="${x}"${x==='1-5'?' selected':''}>${x}</option>`).join('')}</select>
-      </label>
+          `<option value="${d}">${month}/${d}（週${WD[wdOf(month,d)]}）</option>`).join('')}</select></label>
+      <label><div class="aslab">上午</div>${slotSel('_aAM', AM_OPTS, '8-12')}</label>
+      <label><div class="aslab">下午</div>${slotSel('_aPM', PM_OPTS, '1-5')}</label>
     </div>
-    <div style="margin-bottom:10px">
-      <div class="hint" style="margin-bottom:4px">活動名稱（選填，會顯示在同仁的提醒卡上）</div>
-      <input class="cell" id="_aNote" style="cursor:text" placeholder="例：360°醫學人生系列活動">
+
+    <div class="ashrs" id="_aHrs"></div>
+
+    <div style="margin:12px 0 10px">
+      <div class="aslab">活動名稱（選填，會顯示在同仁的提醒卡上）</div>
+      <input class="cell" id="_aNote" style="cursor:text;width:100%" placeholder="例：360°醫學人生系列活動">
     </div>
-    <div class="hint" style="margin-bottom:4px">出勤同仁　<span id="_aCnt"></span></div>
+
+    <div class="aslab" style="margin-bottom:4px">出勤同仁　<span id="_aCnt"></span></div>
     <div class="asgrid" id="_aList"></div>
+
     <div class="row" style="justify-content:space-between;margin-top:14px">
       <button class="btn btn-outlined btn-sm" id="_aAll">全選／全不選</button>
       <span style="display:flex;gap:8px">
@@ -1472,39 +1504,65 @@ function openAssignDialog(){
     </div></div>`;
   document.body.appendChild(mask);
 
-  const dSel = mask.querySelector('#_aD');
+  const $$m = id => mask.querySelector(id);
+  const dSel = $$m('#_aD');
+
+  /* 目前選定的時段 */
+  const valOf = id => {
+    const s = $$m('#'+id), c = $$m('#'+id+'C');
+    if(s.value === '__custom') return (c.value || '').trim();
+    return s.value === 'off' ? 'off' : s.value;
+  };
+  const paintHrs = ()=>{
+    const am = valOf('_aAM'), pm = valOf('_aPM');
+    const h = dutyHours({am, pm});
+    const full = h >= FULL_DAY_HOURS - 0.001;
+    $$m('#_aHrs').className = 'ashrs ' + (full ? 'full' : 'part');
+    $$m('#_aHrs').innerHTML = h
+      ? `合計 <b>${(Math.round(h*10)/10)}</b> 小時　${full ? '→ 滿八小時，需挪移補休' : '→ 未滿八小時，不需挪移補休'}`
+      : '尚未設定時段';
+  };
+  ['_aAM','_aPM'].forEach(id=>{
+    const s = $$m('#'+id), c = $$m('#'+id+'C');
+    s.onchange = ()=>{ c.style.display = s.value === '__custom' ? 'block' : 'none';
+      if(s.value === '__custom') c.focus(); paintHrs(); };
+    c.oninput = paintHrs;
+  });
+
   const paint = ()=>{
     const d = +dSel.value;
     const a = assignOf(month, d);
-    if(a && a.note) mask.querySelector('#_aNote').value = a.note;
-    mask.querySelector('#_aList').innerHTML = roster.map(p=>{
+    if(a && a.note) $$m('#_aNote').value = a.note;
+    $$m('#_aList').innerHTML = roster.map(p=>{
       const c = ((data.shifts||{})[p.id]||{})[d] || {am:'',pm:''};
-      const on = isFullDuty(c);
+      const on = hasWeekendWork(c);
       const now = (c.am || c.pm) ? `${label(c.am)||'—'}／${label(c.pm)||'—'}` : '未填';
       return `<label class="ascell"><input type="checkbox" value="${p.id}"${on?' checked':''}>
-        <span>${p.name}<br><small>${now}</small></span></label>`;
+        <span class="nm">${p.name}</span><small>${now}</small></label>`;
     }).join('');
     const boxes = mask.querySelectorAll('#_aList input');
-    const cnt = ()=> mask.querySelector('#_aCnt').innerHTML =
-      `<b>已勾選 ${[...boxes].filter(b=>b.checked).length} 位</b>`;
+    const cnt = ()=> $$m('#_aCnt').innerHTML = `<b>已勾選 ${[...boxes].filter(b=>b.checked).length} 位</b>`;
     boxes.forEach(b=> b.onchange = cnt);
     cnt();
   };
-  paint();
+  paint(); paintHrs();
   dSel.onchange = paint;
-  mask.querySelector('#_aAll').onclick = ()=>{
+
+  $$m('#_aAll').onclick = ()=>{
     const boxes = [...mask.querySelectorAll('#_aList input')];
     const to = !boxes.every(b=>b.checked);
     boxes.forEach(b=>{ b.checked = to; b.dispatchEvent(new Event('change')); });
   };
   const close = ()=> mask.remove();
-  mask.querySelector('#_aX').onclick = close;
+  $$m('#_aX').onclick = close;
   mask.onclick = e => { if(e.target === mask) close(); };
-  mask.querySelector('#_aOK').onclick = async ()=>{
+
+  $$m('#_aOK').onclick = async ()=>{
     const d  = +dSel.value;
-    const am = mask.querySelector('#_aAM').value;
-    const pm = mask.querySelector('#_aPM').value;
-    const note = mask.querySelector('#_aNote').value.trim();
+    const am = valOf('_aAM'), pm = valOf('_aPM');
+    if(am === 'off' && pm === 'off') return toast('請至少設定一個時段');
+    if(!am || !pm) return toast('「其他」欄位尚未填寫時段');
+    const note = $$m('#_aNote').value.trim();
     const picked = [...mask.querySelectorAll('#_aList input')].filter(b=>b.checked).map(b=>b.value);
     close();
 
@@ -1514,20 +1572,22 @@ function openAssignDialog(){
       const cur = ((data.shifts||{})[p.id]||{})[d] || {am:'',pm:''};
       if(picked.includes(p.id)){
         if(cur.am !== am || cur.pm !== pm){ shifts[p.id] = {[d]: {am, pm}}; add++; }
-      } else if(isFullDuty(cur)){
+      } else if(hasWeekendWork(cur)){
         shifts[p.id] = {[d]: {am:'off', pm:'off'}}; del++;    // 取消勾選 → 還原為休假
       }
     });
     if(!add && !del) return toast('沒有異動');
 
-    const patch = {shifts, assign: {[d]: {by: meName, note, at: stamp(), who: picked.join(',')}}};
+    const patch = {shifts, assign: {[d]: {by: meName, note, at: stamp(), who: picked.join(','),
+                                          am, pm, hrs: Math.round(dutyHours({am,pm})*10)/10}}};
     setSaving(true);
     let ok = false;
     try{ ok = await spatch(mKey(month), patch); } finally { setSaving(false); }
     if(!ok) return toast('⚠️ 儲存失敗，請稍後再試');
     mergeInto(data, patch);
     renderMonth();
-    toast(`✅ ${month}/${d} 已安排 ${picked.length} 位同仁出勤${del?`（取消 ${del} 位）`:''}`);
+    const h = dutyHours({am, pm});
+    toast(`✅ ${month}/${d} 已安排 ${picked.length} 位同仁（${Math.round(h*10)/10} 小時${h>=FULL_DAY_HOURS-0.001?'，需補休':'，不需補休'}）${del?`；取消 ${del} 位`:''}`);
   };
 }
 
@@ -1629,7 +1689,7 @@ async function init(){
   $('#btnStd').onclick = ()=>{ if(!needMe())return;
     const n=daysIn(month); const s=mine(); let keep=0;
     for(let d=1; d<=n; d++){
-      if(isWknd(month,d) && isFullDuty(s[d])){ keep++; continue; }   // 已排定的假日出勤不覆蓋
+      if(isWknd(month,d) && hasWeekendWork(s[d])){ keep++; continue; }   // 已排定的假日出勤不覆蓋
       s[d] = defaultOf(month,d);
     }
     queueSaveMine(); renderDays(); markProgress();
@@ -1643,7 +1703,7 @@ async function init(){
     const src = prev.shifts[me], n = daysIn(month), s = {};
     const src2 = (data.shifts||{})[me] || {};          // 本月現有資料（可能含主責人排定的假日出勤）
     for(let d=1; d<=n; d++){
-      if(isWknd(month,d) && isFullDuty(src2[d])){ s[d] = {...src2[d]}; continue; }  // 保留已排定的假日出勤
+      if(isWknd(month,d) && hasWeekendWork(src2[d])){ s[d] = {...src2[d]}; continue; }  // 保留已排定的假日出勤
       s[d] = defaultOf(month,d);
       if(holidayOf(month,d)) continue;
       const o = src[d];

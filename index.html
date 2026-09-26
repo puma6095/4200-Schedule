@@ -88,6 +88,10 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;bac
 .dayrow.duty{background:#E9F7F0;box-shadow:inset 3px 0 0 var(--md-tertiary)}
 .dayrow.compday{background:#FFF7EB;box-shadow:inset 3px 0 0 #E8942A}
 .daylabel em.cp{background:#E8942A;border-radius:8px;font-size:9px;letter-spacing:-.3px;padding:2px 3px}
+.compcard.lec{background:#F3EEFA;border-color:#C9B6E4}
+.compcard.lec h4{color:#4A3070}
+.daylabel em.lec{background:#6B4EA0;border-radius:8px;font-size:9px;letter-spacing:-.3px;padding:2px 3px}
+.dayrow.lecday{background:#F6F2FC;box-shadow:inset 3px 0 0 #6B4EA0}
 .compcard{background:#FFF4E2;border:1px solid #F0C98A;border-radius:var(--shape-lg);padding:18px 20px;margin-bottom:16px}
 .compcard h4{font-size:17px;font-weight:700;color:#7A4A00;display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px}
 .compitem{background:#fff;border-radius:var(--shape-md);padding:12px 14px;margin-top:10px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
@@ -253,11 +257,21 @@ table.status td:last-child{text-align:right}
 
     <div id="compBox"></div>
 
+    <div id="lecBox"></div>
+
     <div class="card tonal">
       <div class="card-title">📋 假日出勤安排 <span class="sticker">主責人使用</span></div>
       <div class="row">
         <button class="btn btn-filled btn-sm" id="btnAssign">安排週六／週日出勤同仁</button>
         <span class="hint">一次排給多位協助同仁，他們登入後會自動看到挪移補休提醒</span>
+      </div>
+    </div>
+
+    <div class="card tonal">
+      <div class="card-title">🎤 協助全院演講安排 <span class="sticker">主責人使用</span></div>
+      <div class="row">
+        <button class="btn btn-filled btn-sm" id="btnLecture">安排協助演講同仁</button>
+        <span class="hint">僅限週一至週五，預設上午 7:30–12:00、下午 1:00–4:30</span>
       </div>
     </div>
 
@@ -302,6 +316,7 @@ table.status td:last-child{text-align:right}
       <div class="gridbox"><table class="grid" id="gridTable"></table></div>
     </div>
 
+    <div class="card" id="lecAudit"></div>
     <div class="card" id="compAudit"></div>
     <div class="card" id="leaveBox"></div>
   </section>
@@ -708,6 +723,7 @@ function renderDays(){
   for(let d=1; d<=n; d++){
     const c = cell(d), wk = isWknd(month,d), hn = holidayOf(month,d), mt = mdays.includes(d), dt = (d in ddays);
     const cpd = compPending.some(x => inWindow(x.win, month, d));
+    const lcd = (()=>{ const r = assignedToMe(d); return !!(r && r.kind === 'lecture'); })();
     if(hn){
       // 國定假日一律放整天，不分上下午
       if(c.am !== hn || c.pm !== 'off'){ c.am = hn; c.pm = 'off'; dirty = true; }
@@ -718,7 +734,7 @@ function renderDays(){
       continue;
     }
     const filled = c.am || c.pm;
-    h += `<div class="dayrow${mt?' meeting':(dt?' duty':(cpd?' compday':(wk?' weekend':'')))}${filled?'':' empty'}${isThis&&today.getDate()===d?' today':''}" data-d="${d}">
+    h += `<div class="dayrow${lcd?' lecday':(mt?' meeting':(dt?' duty':(cpd?' compday':(wk?' weekend':''))))}${filled?'':' empty'}${isThis&&today.getDate()===d?' today':''}" data-d="${d}">
       ${dayLabelHTML(d)}
       ${slotHTML(d,'am',c.am)}
       ${slotHTML(d,'pm',c.pm)}
@@ -729,7 +745,7 @@ function renderDays(){
   box.querySelectorAll('input.cd').forEach(i=>i.addEventListener('input', onCdInput));
   if(dirty) queueSaveMine();
   lastCompSig = compSig();
-  renderStats(); renderCompBox();
+  renderStats(); renderCompBox(); renderLecBox();
 }
 /* 從本月活動事項中找出「教學品管科部助理會議」的日期（12:30 開會） */
 const MEETING_KEY = '教學品管科部助理會議';
@@ -891,11 +907,13 @@ function dayLabelHTML(d){
   const mt = meetingDays().includes(d);
   const dm = dutyMeetings();
   const cp = compPending.filter(x => inWindow(x.win, month, d));
+  const lc = (()=>{ const r = assignedToMe(d); return r && r.kind === 'lecture'; })();
   return `<div class="daylabel"><b>${month}/${d}</b><span>週${WD[wdOf(month,d)]}</span>`
        + (h ? `<em>${h}</em>` : '')
        + (mt ? `<em class="mt">教學品管會議<br>12:30</em>` : '')
        + ((d in dm) ? `<em class="dm">部務會議${dm[d] ? '<br>'+dm[d] : ''}</em>` : '')
        + (cp.length ? `<em class="cp">可挪補休<br>${cp.map(x=>x.m+'/'+x.d).join('、')}</em>` : '')
+       + (lc ? `<em class="lec">協助演講</em>` : '')
        + `</div>`;
 }
 function slotHTML(d, period, v){
@@ -945,7 +963,8 @@ function refreshRow(d){
   if(!row) return;
   const c = cell(d), wk = isWknd(month,d), hd = !!holidayOf(month,d), mt = meetingDays().includes(d), dt = (d in dutyMeetings());
   const cpd = compPending.some(x => inWindow(x.win, month, d));
-  row.className = `dayrow${hd?' holiday':(mt?' meeting':(dt?' duty':(cpd?' compday':(wk?' weekend':''))))}${(c.am||c.pm)?'':' empty'}`;
+  const lcd = (()=>{ const r = assignedToMe(d); return !!(r && r.kind === 'lecture'); })();
+  row.className = `dayrow${hd?' holiday':(lcd?' lecday':(mt?' meeting':(dt?' duty':(cpd?' compday':(wk?' weekend':'')))))}${(c.am||c.pm)?'':' empty'}`;
   row.querySelector('.daylabel').outerHTML = dayLabelHTML(d);
   ['am','pm'].forEach((p,i)=>{
     const slot = row.querySelectorAll('.slot')[i];
@@ -1041,7 +1060,7 @@ function renderGrid(){
   $('#gridTable').innerHTML = h + '</tbody>';
   const done = roster.filter(p=>data.done[p.id]).length;
   $('#allDone').textContent = `已送出 ${done} / ${roster.length} 人`;
-  renderCompAudit(); renderLeave();
+  renderLecAudit(); renderCompAudit(); renderLeave();
 }
 /* 連續日期合併成區間，例：10/5-7 */
 function fmtDays(arr){
@@ -1455,17 +1474,61 @@ function assignOf(m, d){
   const md = monthDataOf(m);
   return (md && md.assign && md.assign[d]) ? md.assign[d] : null;
 }
-function openAssignDialog(){
+/* 可安排的日期：假日出勤＝週六日；全院演講＝週一至週五（國定假日整日休息，一律排除） */
+function lectureDaysOfMonth(){
+  const n = daysIn(month), out = [];
+  for(let d = 1; d <= n; d++) if(!isWknd(month,d) && !holidayOf(month,d)) out.push(d);
+  return out;
+}
+const ASSIGN_MODES = {
+  weekend: {
+    kind:'weekend', icon:'📋', title:'安排假日出勤',
+    desc:'勾選當天需出勤的同仁，系統會直接寫入他們的班表。滿八小時者，登入後會看到挪移補休提醒。',
+    days:()=>weekendDaysOfMonth(), am:'8-12', pm:'1-5',
+    noteLab:'活動名稱（選填，會顯示在同仁的提醒卡上）',
+    notePh:'例：360°醫學人生系列活動',
+    empty:'本月沒有可安排的週六／週日'
+  },
+  lecture: {
+    kind:'lecture', icon:'🎤', title:'安排協助全院演講',
+    desc:'全院演講僅安排於週一至週五。勾選協助演講的同仁，系統會直接寫入他們的班表，預設上午 7:30–12:00、下午 1:00–4:30。',
+    days:()=>lectureDaysOfMonth(), am:"7'-12", pm:"1-4'",
+    noteLab:'演講名稱（選填，會顯示在同仁的提醒卡上）',
+    notePh:'例：全院演講－醫療品質與病人安全',
+    empty:'本月沒有可安排的平日'
+  }
+};
+/* 把 7'-12 顯示成 7:30–12:00 */
+function timeText(v){
+  const m = String(v || '').trim().match(/^(\d{1,2})('?)\s*-\s*(\d{1,2})('?)$/);
+  if(!m) return (!v || v === 'off') ? '休息' : v;
+  const f = (n,h) => n + ':' + (h ? '30' : '00');
+  return f(m[1],m[2]) + '–' + f(m[3],m[4]);
+}
+/* 這一天我有沒有被主責人排到 */
+function assignedToMe(d){
+  const r = (data.assign || {})[d];
+  if(!r || !me) return null;
+  return String(r.who || '').split(',').includes(me) ? r : null;
+}
+
+function openAssignDialog(modeKey){
+  const M = ASSIGN_MODES[modeKey] || ASSIGN_MODES.weekend;
   if(!me) return toast('請先於右上角選擇你的姓名');
-  const days = weekendDaysOfMonth();
-  if(!days.length) return toast('本月沒有可安排的週六／週日');
+  const days = M.days();
+  if(!days.length) return toast(M.empty);
   const meName = (roster.find(r=>r.id===me)||{}).name || '';
   const numOpts = arr => arr.filter(x=>/^[0-9]/.test(x));
+  const withOpt = (arr, def) => {
+    const list = numOpts(arr).slice();
+    if(def && !list.includes(def)) list.unshift(def);
+    return list;
+  };
 
   const slotSel = (id, arr, def) => `
     <select class="cell" id="${id}">
       <option value="off">不出勤</option>
-      ${numOpts(arr).map(x=>`<option value="${x}"${x===def?' selected':''}>${x}</option>`).join('')}
+      ${withOpt(arr, def).map(x=>`<option value="${x}"${x===def?' selected':''}>${x}</option>`).join('')}
       <option value="__custom">✎ 其他（自行輸入）</option>
     </select>
     <input class="cell" id="${id}C" style="display:none;margin-top:6px;cursor:text" placeholder="例：9-12、10'-1'">`;
@@ -1473,26 +1536,25 @@ function openAssignDialog(){
   const mask = document.createElement('div');
   mask.className = 'mask';
   mask.innerHTML = `<div class="modal" style="max-width:560px;max-height:88vh;overflow:auto">
-    <h3>📋 安排假日出勤</h3>
-    <p class="hint" style="margin:6px 0 14px">
-      勾選當天需出勤的同仁，系統會直接寫入他們的班表。滿八小時者，登入後會看到挪移補休提醒。</p>
+    <h3>${M.icon} ${M.title}</h3>
+    <p class="hint" style="margin:6px 0 14px">${M.desc}</p>
 
     <div class="asrow">
-      <label><div class="aslab">出勤日期</div>
+      <label><div class="aslab">日期</div>
         <select class="cell" id="_aD">${days.map(d=>
           `<option value="${d}">${month}/${d}（週${WD[wdOf(month,d)]}）</option>`).join('')}</select></label>
-      <label><div class="aslab">上午</div>${slotSel('_aAM', AM_OPTS, '8-12')}</label>
-      <label><div class="aslab">下午</div>${slotSel('_aPM', PM_OPTS, '1-5')}</label>
+      <label><div class="aslab">上午</div>${slotSel('_aAM', AM_OPTS, M.am)}</label>
+      <label><div class="aslab">下午</div>${slotSel('_aPM', PM_OPTS, M.pm)}</label>
     </div>
 
     <div class="ashrs" id="_aHrs"></div>
 
     <div style="margin:12px 0 10px">
-      <div class="aslab">活動名稱（選填，會顯示在同仁的提醒卡上）</div>
-      <input class="cell" id="_aNote" style="cursor:text;width:100%" placeholder="例：360°醫學人生系列活動">
+      <div class="aslab">${M.noteLab}</div>
+      <input class="cell" id="_aNote" style="cursor:text;width:100%" placeholder="${M.notePh}">
     </div>
 
-    <div class="aslab" style="margin-bottom:4px">出勤同仁　<span id="_aCnt"></span></div>
+    <div class="aslab" style="margin-bottom:4px">協助同仁　<span id="_aCnt"></span></div>
     <div class="asgrid" id="_aList"></div>
 
     <div class="row" style="justify-content:space-between;margin-top:14px">
@@ -1506,8 +1568,6 @@ function openAssignDialog(){
 
   const $$m = id => mask.querySelector(id);
   const dSel = $$m('#_aD');
-
-  /* 目前選定的時段 */
   const valOf = id => {
     const s = $$m('#'+id), c = $$m('#'+id+'C');
     if(s.value === '__custom') return (c.value || '').trim();
@@ -1516,10 +1576,13 @@ function openAssignDialog(){
   const paintHrs = ()=>{
     const am = valOf('_aAM'), pm = valOf('_aPM');
     const h = dutyHours({am, pm});
+    const wknd = isWknd(month, +dSel.value);
     const full = h >= FULL_DAY_HOURS - 0.001;
-    $$m('#_aHrs').className = 'ashrs ' + (full ? 'full' : 'part');
+    const need = wknd && full;                     // 只有週六日滿八小時才需補休
+    $$m('#_aHrs').className = 'ashrs ' + (need ? 'full' : 'part');
     $$m('#_aHrs').innerHTML = h
-      ? `合計 <b>${(Math.round(h*10)/10)}</b> 小時　${full ? '→ 滿八小時，需挪移補休' : '→ 未滿八小時，不需挪移補休'}`
+      ? `${timeText(am)}　${timeText(pm)}　合計 <b>${Math.round(h*10)/10}</b> 小時`
+        + (wknd ? `　${full ? '→ 假日滿八小時，需挪移補休' : '→ 假日未滿八小時，不需補休'}` : '　→ 平日，不需補休')
       : '尚未設定時段';
   };
   ['_aAM','_aPM'].forEach(id=>{
@@ -1531,11 +1594,13 @@ function openAssignDialog(){
 
   const paint = ()=>{
     const d = +dSel.value;
-    const a = assignOf(month, d);
-    if(a && a.note) $$m('#_aNote').value = a.note;
+    const a = (data.assign || {})[d];
+    if(a && a.kind === M.kind && a.note) $$m('#_aNote').value = a.note;
     $$m('#_aList').innerHTML = roster.map(p=>{
       const c = ((data.shifts||{})[p.id]||{})[d] || {am:'',pm:''};
-      const on = hasWeekendWork(c);
+      const on = a && a.kind === M.kind
+        ? String(a.who||'').split(',').includes(p.id)
+        : (M.kind === 'weekend' && hasWeekendWork(c));
       const now = (c.am || c.pm) ? `${label(c.am)||'—'}／${label(c.pm)||'—'}` : '未填';
       return `<label class="ascell"><input type="checkbox" value="${p.id}"${on?' checked':''}>
         <span class="nm">${p.name}</span><small>${now}</small></label>`;
@@ -1543,9 +1608,9 @@ function openAssignDialog(){
     const boxes = mask.querySelectorAll('#_aList input');
     const cnt = ()=> $$m('#_aCnt').innerHTML = `<b>已勾選 ${[...boxes].filter(b=>b.checked).length} 位</b>`;
     boxes.forEach(b=> b.onchange = cnt);
-    cnt();
+    cnt(); paintHrs();
   };
-  paint(); paintHrs();
+  paint();
   dSel.onchange = paint;
 
   $$m('#_aAll').onclick = ()=>{
@@ -1566,29 +1631,104 @@ function openAssignDialog(){
     const picked = [...mask.querySelectorAll('#_aList input')].filter(b=>b.checked).map(b=>b.value);
     close();
 
+    const prev = (data.assign || {})[d];
+    const prevWho = (prev && prev.kind === M.kind) ? String(prev.who||'').split(',').filter(Boolean) : [];
     const shifts = {};
     let add = 0, del = 0;
     roster.forEach(p=>{
       const cur = ((data.shifts||{})[p.id]||{})[d] || {am:'',pm:''};
       if(picked.includes(p.id)){
         if(cur.am !== am || cur.pm !== pm){ shifts[p.id] = {[d]: {am, pm}}; add++; }
-      } else if(hasWeekendWork(cur)){
-        shifts[p.id] = {[d]: {am:'off', pm:'off'}}; del++;    // 取消勾選 → 還原為休假
+      } else if(prevWho.includes(p.id) || (M.kind === 'weekend' && isWknd(month,d) && hasWeekendWork(cur))){
+        shifts[p.id] = {[d]: defaultOf(month, d)}; del++;     // 取消勾選 → 還原為該日預設班
       }
     });
     if(!add && !del) return toast('沒有異動');
 
-    const patch = {shifts, assign: {[d]: {by: meName, note, at: stamp(), who: picked.join(','),
-                                          am, pm, hrs: Math.round(dutyHours({am,pm})*10)/10}}};
+    const patch = {shifts, assign: {[d]: {kind: M.kind, by: meName, note, at: stamp(),
+      who: picked.join(','), am, pm, hrs: Math.round(dutyHours({am,pm})*10)/10}}};
     setSaving(true);
     let ok = false;
     try{ ok = await spatch(mKey(month), patch); } finally { setSaving(false); }
     if(!ok) return toast('⚠️ 儲存失敗，請稍後再試');
     mergeInto(data, patch);
     renderMonth();
-    const h = dutyHours({am, pm});
-    toast(`✅ ${month}/${d} 已安排 ${picked.length} 位同仁（${Math.round(h*10)/10} 小時${h>=FULL_DAY_HOURS-0.001?'，需補休':'，不需補休'}）${del?`；取消 ${del} 位`:''}`);
+    const need = isWknd(month,d) && dutyHours({am,pm}) >= FULL_DAY_HOURS - 0.001;
+    toast(`✅ ${month}/${d} ${M.kind==='lecture'?'演講協助':'假日出勤'}已安排 ${picked.length} 位`
+      + (need ? '（需挪移補休）' : '') + (del ? `；取消 ${del} 位` : ''));
   };
+}
+
+/* ── 我被排到的全院演講 ── */
+function myLectures(){
+  if(!me) return [];
+  const a = data.assign || {}, out = [];
+  Object.keys(a).forEach(k=>{
+    const r = a[k];
+    if(!r || r.kind !== 'lecture') return;
+    if(!String(r.who||'').split(',').includes(me)) return;
+    out.push({d:+k, r});
+  });
+  return out.sort((x,y)=>x.d-y.d);
+}
+function renderLecBox(){
+  const box = $('#lecBox'); if(!box) return;
+  const list = myLectures();
+  if(!list.length){ box.innerHTML = ''; return; }
+  const items = list.map(x=>{
+    const c = (mine()[x.d]) || {am:'',pm:''};
+    const same = c.am === x.r.am && c.pm === x.r.pm;
+    const off  = isDayOff(c);
+    const badge = off  ? `<span class="badge-no">你已排休</span>`
+                : same ? `<span class="badge-ok">✓ 班表相符</span>`
+                       : `<span class="badge-late">⚠ 時段已變更</span>`;
+    return `<div class="compitem">
+      <div style="min-width:0">
+        <div class="t">${month}/${x.d}（週${WD[wdOf(month,x.d)]}）協助全院演講</div>
+        ${x.r.note ? `<div class="asgnote">${x.r.note}</div>` : ''}
+        <div class="w">上午 ${timeText(x.r.am)}　下午 ${timeText(x.r.pm)}　由 ${x.r.by} 安排</div>
+        ${same ? '' : `<div class="w">目前班表：上午 ${label(c.am)||'（空白）'}　下午 ${label(c.pm)||'（空白）'}</div>`}
+      </div>
+      <div class="st">${badge}${same ? '' :
+        `<button class="btn btn-tonal btn-sm" data-lec="${x.d}">套用演講時段</button>`}</div>
+    </div>`;
+  }).join('');
+  box.innerHTML = `<div class="compcard lec">
+    <h4>🎤 協助全院演講</h4>
+    <div class="w" style="font-size:13px;color:#4A3070">
+      你被主責人排定協助下列全院演講，當天請依指定時段出勤。</div>
+    ${items}</div>`;
+  box.querySelectorAll('button[data-lec]').forEach(b=>{
+    b.onclick = async ()=>{
+      const d = +b.dataset.lec, r = (data.assign||{})[d];
+      if(!r) return;
+      mine()[d] = {am: r.am, pm: r.pm};
+      const ok = await saveMine();
+      renderDays(); markProgress();
+      toast(ok ? `已套用 ${month}/${d} 的演講時段` : '⚠️ 儲存失敗，請稍後再試');
+    };
+  });
+}
+/* ── 主管用：本月全院演講協助名單 ── */
+function renderLecAudit(){
+  const box = $('#lecAudit'); if(!box) return;
+  const a = data.assign || {};
+  const days = Object.keys(a).filter(k => a[k] && a[k].kind === 'lecture').map(Number).sort((x,y)=>x-y);
+  if(!days.length){ box.innerHTML = `<div class="card-title">🎤 本月全院演講協助</div><p class="hint">本月尚未安排全院演講協助人員。</p>`; return; }
+  const rows = days.map(d=>{
+    const r = a[d];
+    const who = String(r.who||'').split(',').filter(Boolean).map(id=>{
+      const p = roster.find(x=>x.id===id); if(!p) return '';
+      const c = ((data.shifts||{})[id]||{})[d] || {am:'',pm:''};
+      const bad = isDayOff(c);
+      return `<span class="${bad?'badge-no':'badge-ok'}" style="margin:2px 4px 2px 0;display:inline-block">${p.name}${bad?'（已排休）':''}</span>`;
+    }).join('');
+    return `<tr><td style="white-space:nowrap"><b>${month}/${d}</b><br><span class="hint">週${WD[wdOf(month,d)]}</span></td>
+      <td>${r.note || '（未填演講名稱）'}<br><span class="hint">上午 ${timeText(r.am)}　下午 ${timeText(r.pm)}　由 ${r.by} 安排</span></td>
+      <td>${who || '<span class="hint">未指派</span>'}</td></tr>`;
+  }).join('');
+  box.innerHTML = `<div class="card-title">🎤 本月全院演講協助</div>
+    <table class="status"><tbody>${rows}</tbody></table>`;
 }
 
 /* ── 畫面切換 ── */
@@ -1684,16 +1824,18 @@ async function init(){
   $('#selMe').onchange = async e => { me = e.target.value; renderDays(); markProgress(); switchViewKeep(); };
   $$('.tab').forEach(t=>t.onclick = ()=>switchView(t.dataset.view));
 
-  $('#btnAssign').onclick = ()=> openAssignDialog();
+  $('#btnAssign').onclick  = ()=> openAssignDialog('weekend');
+  $('#btnLecture').onclick = ()=> openAssignDialog('lecture');
 
   $('#btnStd').onclick = ()=>{ if(!needMe())return;
     const n=daysIn(month); const s=mine(); let keep=0;
     for(let d=1; d<=n; d++){
+      if(assignedToMe(d)){ keep++; continue; }                           // 主責人排定的出勤不覆蓋
       if(isWknd(month,d) && hasWeekendWork(s[d])){ keep++; continue; }   // 已排定的假日出勤不覆蓋
       s[d] = defaultOf(month,d);
     }
     queueSaveMine(); renderDays(); markProgress();
-    toast(keep ? `已套用標準班（保留 ${keep} 天假日出勤）` : '已套用標準班，記得調整例外日'); };
+    toast(keep ? `已套用標準班（保留 ${keep} 天已排定的出勤）` : '已套用標準班，記得調整例外日'); };
   $('#btnClear').onclick = ()=>{ if(!needMe())return;
     data.shifts[me] = {}; queueSaveMine(); renderDays(); markProgress(); toast('已清空本月'); };
   $('#btnCopy').onclick = async ()=>{ if(!needMe())return;
@@ -1703,6 +1845,7 @@ async function init(){
     const src = prev.shifts[me], n = daysIn(month), s = {};
     const src2 = (data.shifts||{})[me] || {};          // 本月現有資料（可能含主責人排定的假日出勤）
     for(let d=1; d<=n; d++){
+      if(assignedToMe(d) && src2[d]){ s[d] = {...src2[d]}; continue; }                  // 保留主責人排定的出勤
       if(isWknd(month,d) && hasWeekendWork(src2[d])){ s[d] = {...src2[d]}; continue; }  // 保留已排定的假日出勤
       s[d] = defaultOf(month,d);
       if(holidayOf(month,d)) continue;
@@ -1723,6 +1866,19 @@ async function init(){
   $('#fabSubmit').onclick = async ()=>{ if(!needMe())return;
     const n=daysIn(month), s=mine(); let f=0;
     for(let d=1; d<=n; d++){ if(s[d]&&(s[d].am||s[d].pm)) f++; }
+
+    // 協助全院演講日排休提醒
+    const lecBad = myLectures().filter(x => isDayOff(mine()[x.d] || {am:'',pm:''}));
+    if(lecBad.length){
+      const rows = lecBad.map(x=>`<li style="margin-bottom:8px"><b>${month}/${x.d}（週${WD[wdOf(month,x.d)]}）</b>
+        ${x.r.note ? '　'+x.r.note : ''}<br>
+        <span class="hint">指定時段：上午 ${timeText(x.r.am)}　下午 ${timeText(x.r.pm)}　由 ${x.r.by} 安排</span></li>`).join('');
+      const go = await confirmBox('🎤 協助全院演講日提醒',
+        `<p>下列日期你被排定協助全院演講，但目前班表是休假。若確定無法出席，請先與主責人確認。</p>
+         <ul style="margin:12px 0 0 18px">${rows}</ul>`,
+        '確認要排休', '返回修改');
+      if(!go) return;
+    }
 
     // 週末出勤挪移補休檢查
     refreshCompPending();

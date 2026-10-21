@@ -262,6 +262,8 @@ table.status td:last-child{text-align:right}
       <div id="eventList" class="hint">（本月尚未輸入活動事項）</div>
     </div>
 
+    <div id="compNotice"></div>
+
     <div id="compBox"></div>
 
     <div id="lecBox"></div>
@@ -430,7 +432,17 @@ const HOLIDAYS = {
   '10-25':'光復節',   '10-26':'光復節補休',
   '12-25':'行憲紀念日'
 };
-const BUILD  = '2026-09-30b';   // 版本標記：管理頁可看到，回報問題時請附上
+/* 週末出勤挪移補休週間（key = 月-日，值 = [起, 迄]，皆為 月-日）
+   院方公告的指定出勤日與挪移週間：列在這裡的日期會顯示於班表的提醒卡，
+   並以此週間取代系統自動推算的範圍。 */
+const COMP_WINDOWS = {
+  '11-14':['10-26','11-20'],   // 週六：四週內
+  '11-15':['11-9', '11-20'],   // 週日：二週內
+  '11-21':['10-26','11-20'],   // 週六：四週內
+  '11-22':['11-23','12-4'],    // 週日：二週內
+  '11-29':['11-23','12-4']     // 週日：二週內
+};
+const BUILD  = '2026-10-21';   // 版本標記：管理頁可看到，回報問題時請附上
 const XLFONT = 'Microsoft JhengHei';
 const MAX_EVENTS  = 10;  // 本月重要活動可輸入的行數上限
 const MIN_ON_DUTY = 8;   // 平日在班人數低於此值即標紅提醒
@@ -802,6 +814,7 @@ function isDayOff(c){
      週日出勤 → 二週內（該週 ～ 下一週）
    例：10/17(六) → 9/28–10/23；10/18(日) → 10/12–10/23
    ※ 窗期可跨月，系統會一併檢查前後月份的班表。
+   ※ 院方另有公告的週間寫在 COMP_WINDOWS，以公告為準。
 ─────────────────────────────────────────────────────── */
 const AD_YEAR = ROC_YEAR + 1911;
 const dateOf = (m,d) => new Date(AD_YEAR, m-1, d);
@@ -813,6 +826,11 @@ function weekMonday(dt){
 function compWindow(m, d){
   const dt = dateOf(m,d), wd = dt.getDay();
   if(wd !== 0 && wd !== 6) return null;
+  const fix = COMP_WINDOWS[m+'-'+d];
+  if(fix){
+    const [st, en] = fix.map(k => { const [a,b] = k.split('-').map(Number); return dateOf(a,b); });
+    return {start: st, end: en, kind: wd === 6 ? '六' : '日', weeks: wd === 6 ? 4 : 2};
+  }
   const ws = weekMonday(dt);
   const st = new Date(ws); if(wd === 6) st.setDate(st.getDate() - 14);
   const en = new Date(ws); en.setDate(en.getDate() + 11);
@@ -1324,8 +1342,35 @@ function meetingBox(days, shifts){
   });
 }
 
+/* ── 本月指定週末出勤日與挪移週間（全員可見） ── */
+function renderCompNotice(){
+  const box = $('#compNotice'); if(!box) return;
+  const ks = Object.keys(COMP_WINDOWS)
+    .map(k => k.split('-').map(Number))
+    .filter(([m]) => m === month)
+    .sort((a,b) => a[1] - b[1]);
+  if(!ks.length){ box.innerHTML = ''; return; }
+  const items = ks.map(([m,d])=>{
+    const w = compWindow(m,d);
+    return `<div class="compitem">
+      <div style="min-width:0">
+        <div class="t">${m}/${d}（週${w.kind}）</div>
+        <div class="w">挪移週間：<b>${winText(w)}</b>（${w.weeks} 週內，平日 W一至W五）</div>
+      </div>
+    </div>`;
+  }).join('');
+  box.innerHTML = `<div class="compcard">
+    <h4>📢 ${month} 月週末出勤挪移補休提醒</h4>
+    <div class="w" style="font-size:13px;color:#7A4A00">
+      被指派於下列日期出勤滿八小時的同仁，請於對應週間內擇一平日挪移補休整日
+      （週六出勤四週內、週日出勤二週內）。</div>
+    ${items}
+  </div>`;
+}
+
 /* ── 週末出勤補休：個人提醒卡 ── */
 function renderCompBox(){
+  renderCompNotice();
   const box = $('#compBox'); if(!box) return;
   if(!me){ box.innerHTML = ''; return; }
   const list = myDuties().map(x => Object.assign({}, x, {st: dutyStatus(me, x)}));

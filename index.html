@@ -369,7 +369,7 @@ table.status td:last-child{text-align:right}
 
       <div class="card">
         <div class="card-title">📌 本月活動事項</div>
-        <p class="hint" style="margin-bottom:8px">一行一則，最多 10 則，會填入 Excel 標題下方（例：8/17【教學部部務會議】）。</p>
+        <p class="hint" style="margin-bottom:8px">一行一則，最多 12 則，會填入 Excel 標題下方（例：8/17【教學部部務會議】）。</p>
         <textarea class="ta" id="taEvents" placeholder="8/17【教學部部務會議】"></textarea>
         <div class="row" style="margin-top:10px">
           <button class="btn btn-filled btn-sm" id="btnSaveEvents">儲存活動</button>
@@ -445,9 +445,9 @@ const COMP_WINDOWS = {
   '11-22':['11-23','12-4'],    // 週日：二週內
   '11-29':['11-23','12-4']     // 週日：二週內
 };
-const BUILD  = '2026-10-22b';  // 版本標記：管理頁可看到，回報問題時請附上
+const BUILD  = '2026-10-30a';  // 版本標記：管理頁可看到，回報問題時請附上
 const XLFONT = 'Microsoft JhengHei';
-const MAX_EVENTS  = 10;  // 本月重要活動可輸入的行數上限
+const MAX_EVENTS  = 12;  // 本月重要活動可輸入的行數上限
 const MIN_ON_DUTY = 8;   // 平日在班人數低於此值即標紅提醒
 /* ═══════════════════════════════════════════════════════════ */
 
@@ -1190,8 +1190,9 @@ function buildSheet(wb, m, md){
   const evs = (md.events || []).slice(0, MAX_EVENTS);
   const HR  = Math.max(evs.length, 7) + 2;   // 表頭列：活動 7 則以內維持第 9 列，超過則往下移
   const ws = wb.addWorksheet(`${m}月`, {
-    pageSetup:{orientation:'landscape', paperSize:9, fitToPage:true, fitToWidth:1, fitToHeight:0, margins:{left:.3,right:.3,top:.4,bottom:.4,header:.2,footer:.2}},
-    views:[{state:'frozen', xSplit:2, ySplit:HR}]
+    pageSetup:{orientation:'landscape', paperSize:9, fitToPage:true, fitToWidth:1, fitToHeight:0, horizontalCentered:true,
+               margins:{left:.315,right:.315,top:.197,bottom:.197,header:.197,footer:.197}},
+    views:[{state:'frozen', xSplit:2, ySplit:HR, zoomScale:55, zoomScaleNormal:55}]
   });
   const F = (size=14, bold=false, red=false) => ({name:XLFONT, size, bold, color:{argb: red?'FFFF0000':'FF000000'}});
   const C = {horizontal:'center', vertical:'middle', wrapText:true};
@@ -1199,31 +1200,28 @@ function buildSheet(wb, m, md){
   const B = {top:thin,left:thin,bottom:thin,right:thin};
   const fillOf = argb => ({type:'pattern', pattern:'solid', fgColor:{argb:'FF'+argb}});
 
-  ws.getColumn(1).width = 9.89; ws.getColumn(2).width = 6.89;
-  for(let c=3; c<=last; c++) ws.getColumn(c).width = 5.4;
+  // 欄寬、列高比照 115 年 11 月班表模版
+  ws.getColumn(1).width = 12.625; ws.getColumn(2).width = 6.875;
+  for(let c=3; c<=last; c++) ws.getColumn(c).width = 10.625;
 
-  // 標題
+  // 標題（紫底白字）
   ws.mergeCells(1,1,1,last);
   const t = ws.getCell(1,1);
   t.value = `${ROC_YEAR}年${String(m).padStart(2,'0')}月份排班表`;
-  t.font = F(18,true); t.alignment = C; ws.getRow(1).height = 32.25;
+  t.font = {name:XLFONT, size:20, bold:true, color:{argb:'FFFFFFFF'}};
+  t.fill = fillOf('8064A2'); t.alignment = C; ws.getRow(1).height = 32.25;
 
-  // 活動事項（第 2–8 列，A:J 合併）
+  // 活動事項（第 2 列起，A:J 合併）
+  for(let r=2; r<HR; r++) ws.getRow(r).height = 18;
   evs.forEach((ev,i)=>{
     const r = 2+i;
     ws.mergeCells(r,1,r,10);
     const c = ws.getCell(r,1);
     c.value = ev; c.font = F(14); c.alignment = {horizontal:'left', vertical:'middle', wrapText:true};
   });
-  // 色碼說明（第 2 列右側）
-  [['off','D8D8D8'],['年假','92D050'],['事假/病假','EA9999'],['公假','FFD965'],['補休','FFC000'],['婚產喪假','FFFF00']]
-    .forEach(([txt,fill],i)=>{
-      const c = ws.getCell(2, Math.min(last, 20+i));
-      c.value = txt; c.fill = fillOf(fill); c.font = F(11); c.alignment = C; c.border = B;
-    });
 
-  // 表頭（第 9 列）
-  const hr = ws.getRow(HR); hr.height = 75;
+  // 表頭
+  const hr = ws.getRow(HR); hr.height = 67.8;
   const setH = (col,val,wknd) => {
     const c = ws.getCell(HR,col);
     c.value = val; c.font = F(14); c.alignment = C; c.border = B;
@@ -1246,18 +1244,32 @@ function buildSheet(wb, m, md){
       const pc = ws.getCell(r,2);
       pc.value = period.toUpperCase(); pc.font = F(14); pc.alignment = C; pc.border = B;
       for(let d=1; d<=n; d++){
-        const v = (s[d]||{})[period] || '';
+        const day = s[d] || {};
+        const merged = mergeDay(m, d, day);
+        const v = merged ? day.am : (day[period] || '');
         const c = ws.getCell(r, 2+d);
-        c.value = v.startsWith('補休|') ? '補\n'+v.slice(3) : v;
         const st = styleOf(v, period);
-        c.font = F(14,false,st.red);
+        const offDay = isWknd(m,d) || !!holidayOf(m,d);
+        c.font = F(14,false, st.red || (offDay && st.fill==='FFFFFF'));   // 假日上班時段一律紅字
         c.alignment = C; c.border = B;
-        if(st.fill) c.fill = fillOf(st.fill);
+        if(v==='off' && !offDay) c.fill = fillOf('FFFF00');          // 平日 off 標黃（同模版）
+        else if(st.fill) c.fill = fillOf(st.fill);
         else if(isWknd(m,d)) c.fill = fillOf('F2F2F2');
+        if(merged && i===1) ws.mergeCells(r0, 2+d, r, 2+d);   // 整天假別：上下午合併一格
+        else c.value = v.startsWith('補休|') ? '補\n'+v.slice(3) : v;
       }
     });
   });
   return ws;
+}
+/* 整天的假別（上午填寫、下午空白或相同）→ 上下午合併成一格；週末／國定假日的 off 維持兩格（同模版） */
+const MERGE_LEAVES = new Set(['年假','off','公假','事假','病假','婚假','產假','喪假']);
+function mergeDay(m, d, day){
+  const am = day.am || '', pm = day.pm || '';
+  const offDay = isWknd(m,d) || !!holidayOf(m,d);
+  if(!(MERGE_LEAVES.has(am) || am.startsWith('補休|'))) return false;
+  if(am === 'off' && offDay) return false;
+  return !pm || pm === am || (offDay && pm === 'off');   // 假日下午預設 off，上午填假別時仍視為整天
 }
 async function exportXlsx(months){
   if(typeof ExcelJS === 'undefined'){ toast('⚠️ 匯出元件載入中，請稍候再試'); return; }

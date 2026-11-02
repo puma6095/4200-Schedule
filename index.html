@@ -445,7 +445,7 @@ const COMP_WINDOWS = {
   '11-22':['11-23','12-4'],    // 週日：二週內
   '11-29':['11-23','12-4']     // 週日：二週內
 };
-const BUILD  = '2026-11-02a';  // 版本標記：管理頁可看到，回報問題時請附上
+const BUILD  = '2026-11-02b';  // 版本標記：管理頁可看到，回報問題時請附上
 const XLFONT = 'Microsoft JhengHei';
 const MAX_EVENTS  = 12;  // 本月重要活動可輸入的行數上限
 const MIN_ON_DUTY = 8;   // 平日在班人數低於此值即標紅提醒
@@ -742,7 +742,6 @@ function renderDays(){
   const n = daysIn(month);
   const mdays = meetingDays();
   const ddays = dutyMeetings();
-  const ledays = lectureEvents();
   refreshCompPending();
   let dirty = false;
   const today = new Date();
@@ -751,7 +750,7 @@ function renderDays(){
   for(let d=1; d<=n; d++){
     const c = cell(d), wk = isWknd(month,d), hn = holidayOf(month,d), mt = mdays.includes(d), dt = (d in ddays);
     const cpd = compPending.some(x => inWindow(x.win, month, d));
-    const lcd = (()=>{ const r = assignedToMe(d); return !!(r && r.kind === 'lecture'); })() || (d in ledays);
+    const lcd = (()=>{ const r = assignedToMe(d); return !!(r && r.kind === 'lecture'); })();
     if(hn){
       // 國定假日一律放整天，不分上下午
       if(c.am !== hn || c.pm !== 'off'){ c.am = hn; c.pm = 'off'; dirty = true; }
@@ -816,20 +815,17 @@ function lectureEvents(){
   });
   return out;
 }
-/* 我需配合的演講日：活動事項中的全院演講（當天若已指派協助人員，只算被排到的人）＋主責人排給我的演講 */
+/* 我需配合改班的演講日：僅限主責人以「安排協助全院演講」指派給我的日期。
+   演講時間以活動事項註明的 7:00／7:30 為準；未註明則依指派的上午時段（最晚 7:30） */
+function lectureTimeFor(d){
+  const ev = lectureEvents();
+  if(d in ev) return ev[d];
+  const r = assignedToMe(d), st = r ? rangeStart(r.am) : null;
+  return st != null ? Math.min(st, 7.5) : 7.5;
+}
 function myLectureDays(){
-  const out = {}, ev = lectureEvents(), asg = data.assign || {};
-  Object.keys(ev).forEach(k=>{
-    const r = asg[k];
-    if(r && r.kind === 'lecture' && !String(r.who||'').split(',').includes(me)) return;
-    out[k] = ev[k];
-  });
-  myLectures().forEach(x=>{
-    if(!isWorkday(x.d)) return;
-    const st = rangeStart(x.r.am);
-    const t = st != null ? Math.min(st, 7.5) : 7.5;
-    if(!(x.d in out) || t < out[x.d]) out[x.d] = t;
-  });
+  const out = {};
+  myLectures().forEach(x=>{ if(isWorkday(x.d)) out[x.d] = lectureTimeFor(x.d); });
   return out;
 }
 /* 中午開會日的合法班別：延後上班或提早下班，二擇一 */
@@ -1061,18 +1057,16 @@ function refreshCompPending(){
 function dayLabelHTML(d){
   const h = holidayOf(month,d);
   const mi = meetingInfo(), mt = d in mi;
-  const le = lectureEvents();
   const dm = dutyMeetings();
   const cp = compPending.filter(x => inWindow(x.win, month, d));
   const lc = (()=>{ const r = assignedToMe(d); return r && r.kind === 'lecture'; })();
   return `<div class="daylabel"><b>${month}/${d}</b><span>週${WD[wdOf(month,d)]}</span>`
        + (h ? `<em>${h}</em>` : '')
        + (mt ? `<em class="mt">${mi[d]}<br>12:30</em>` : '')
-       + ((d in le) && !lc ? `<em class="lec">全院演講<br>${clockText(le[d])}</em>` : '')
        + ((d in dm) ? `<em class="dm">部務會議${dm[d] ? '<br>'+dm[d] : ''}</em>` : '')
        + (dinnerDays().includes(d) ? `<em class="dn">晚宴／餐會<br>兩段班<br>8-12、5-9<br>或 1-5、5-9</em>` : '')
        + (cp.length ? `<em class="cp">可挪補休<br>${cp.map(x=>x.m+'/'+x.d).join('、')}</em>` : '')
-       + (lc ? `<em class="lec">協助演講${(d in le) ? '<br>'+clockText(le[d]) : ''}</em>` : '')
+       + (lc ? `<em class="lec">協助演講<br>${clockText(lectureTimeFor(d))}</em>` : '')
        + `</div>`;
 }
 function slotHTML(d, period, v){
@@ -1159,7 +1153,7 @@ function refreshRow(d){
   if(!row) return;
   const c = cell(d), wk = isWknd(month,d), hd = !!holidayOf(month,d), mt = meetingDays().includes(d), dt = (d in dutyMeetings());
   const cpd = compPending.some(x => inWindow(x.win, month, d));
-  const lcd = (()=>{ const r = assignedToMe(d); return !!(r && r.kind === 'lecture'); })() || (d in lectureEvents());
+  const lcd = (()=>{ const r = assignedToMe(d); return !!(r && r.kind === 'lecture'); })();
   row.className = `dayrow${hd?' holiday':(lcd?' lecday':(mt?' meeting':(dt?' duty':(cpd?' compday':(wk?' weekend':'')))))}${(c.am||c.pm)?'':' empty'}`;
   row.querySelector('.daylabel').outerHTML = dayLabelHTML(d);
   ['am','pm'].forEach((p,i)=>{
@@ -1541,13 +1535,13 @@ function shiftRuleBox(days, shifts, mi, li){
     mask.innerHTML = `<div class="modal" style="max-width:500px;max-height:88vh;overflow:auto">
       <h3>⚠️ 演講／午間會議日請改班</h3>
       <div style="font-size:14px;margin:10px 0 14px">
-        <p>下列平日有早晨全院演講或 12:30 午間會議，但你的班別尚未調整（晚上班或提早下班），
-           當日工時仍須維持 8 小時。請逐日套用建議班別，或返回自行修改：</p>
+        <p>下列平日你被指派協助早晨全院演講，或有 12:30 午間會議，但班別尚未調整（晚上班或提早下班），
+           當日工時仍須維持 8 小時。<b>須全部改班後才能送出</b>，請逐日套用建議班別，或返回自行修改：</p>
         <ul style="margin:12px 0 0 18px">${rows}</ul>
       </div>
       <div class="row" style="justify-content:flex-end;gap:8px">
         <button class="btn btn-filled btn-sm" id="_rE">返回自行修改</button>
-        <button class="btn btn-outlined btn-sm" id="_rS">仍要送出</button>
+        <button class="btn btn-outlined btn-sm" id="_rS" disabled style="opacity:.45;cursor:not-allowed">尚有 ${days.length} 天未改班</button>
       </div></div>`;
     document.body.appendChild(mask);
     let changed = false, left = days.length;
@@ -1559,11 +1553,13 @@ function shiftRuleBox(days, shifts, mi, li){
         const li = mask.querySelector(`li[data-row="${d}"]`);
         li.querySelector('[data-btns]').remove();
         li.querySelector('[data-now]').innerHTML = `<span style="color:#1B6E3A;font-weight:700">✓ 已改為 ${o.am}／${o.pm}</span>`;
-        if(!left){ const s = mask.querySelector('#_rS'); s.textContent = '繼續送出'; s.className = 'btn btn-filled btn-sm'; }
+        const s = mask.querySelector('#_rS');
+        if(left){ s.textContent = `尚有 ${left} 天未改班`; }
+        else { s.textContent = '繼續送出'; s.className = 'btn btn-filled btn-sm'; s.disabled = false; s.style.cssText = ''; }
       };
     });
     mask.querySelector('#_rE').onclick = ()=>done('edit');
-    mask.querySelector('#_rS').onclick = ()=>done('send');
+    mask.querySelector('#_rS').onclick = ()=>{ if(!left) done('send'); };
     mask.onclick = e => { if(e.target===mask) done('edit'); };
   });
 }
@@ -2227,7 +2223,7 @@ async function init(){
     if(bad.length){
       const r = await shiftRuleBox(bad, s, mi, li);
       if(r.changed){ renderDays(); markProgress(); }
-      if(r.act === 'edit'){ if(r.changed) queueSaveMine(); return; }
+      if(r.act !== 'send'){ if(r.changed) queueSaveMine(); return; }   // 未全部改班不得送出
     }
 
     // 部務會議日排休提醒
@@ -2284,8 +2280,8 @@ async function init(){
     if(!ok) return;
     renderEvents();
     if(me){ renderDays(); markProgress(); }
-    const md = meetingDays().length, ld = Object.keys(lectureEvents()).length;
-    toast(md || ld ? `活動事項已儲存，已標記${md ? ` ${md} 個午間會議日` : ''}${ld ? ` ${ld} 個全院演講日` : ''}` : '活動事項已儲存'); };
+    const md = meetingDays().length;
+    toast(md ? `活動事項已儲存，已標記 ${md} 個午間會議日` : '活動事項已儲存'); };
   $('#btnSaveRoster').onclick = async ()=>{
     const rs = $('#taRoster').value.split('\n').map(l=>l.trim()).filter(Boolean).map(l=>{
       const [id,...rest] = l.split(/[,，\t]/); return {id:(id||'').trim(), name:rest.join('').trim()};

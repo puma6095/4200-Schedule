@@ -434,7 +434,7 @@ const HOLIDAYS = {
   '10-25':'光復節',   '10-26':'光復節補休',
   '12-25':'行憲紀念日'
 };
-/* 週末出勤挪移補休週間（key = 月-日，值 = [起, 迄]，皆為 月-日）
+/* 週末出勤挪移補休週間（key = 月-日，值 = [起, 迄]，皆為 月-日；跨年請寫 民國年-月-日，例：'116-1-1'）
    院方公告的指定出勤日與挪移週間：列在這裡的日期會顯示於班表的提醒卡，
    並以此週間取代系統自動推算的範圍。 */
 const COMP_WINDOWS = {
@@ -443,9 +443,11 @@ const COMP_WINDOWS = {
   '11-15':['11-9', '11-20'],   // 週日：二週內
   '11-21':['10-26','11-20'],   // 週六：四週內
   '11-22':['11-23','12-4'],    // 週日：二週內
-  '11-29':['11-23','12-4']     // 週日：二週內
+  '11-29':['11-23','12-4'],    // 週日：二週內
+  '12-19':['11-23','12-18'],   // 週六：四週內
+  '12-20':['12-21','116-1-1']  // 週日：二週內（跨年）
 };
-const BUILD  = '2026-11-02b';  // 版本標記：管理頁可看到，回報問題時請附上
+const BUILD  = '2026-11-23a';  // 版本標記：管理頁可看到，回報問題時請附上
 const XLFONT = 'Microsoft JhengHei';
 const MAX_EVENTS  = 12;  // 本月重要活動可輸入的行數上限
 const MIN_ON_DUTY = 8;   // 平日在班人數低於此值即標紅提醒
@@ -906,7 +908,10 @@ function compWindow(m, d){
   if(wd !== 0 && wd !== 6) return null;
   const fix = COMP_WINDOWS[m+'-'+d];
   if(fix){
-    const [st, en] = fix.map(k => { const [a,b] = k.split('-').map(Number); return dateOf(a,b); });
+    const [st, en] = fix.map(k => {
+      const p = k.split('-').map(Number);
+      return p.length === 3 ? new Date(p[0] + 1911, p[1]-1, p[2]) : dateOf(p[0], p[1]);
+    });
     return {start: st, end: en, kind: wd === 6 ? '六' : '日', weeks: wd === 6 ? 4 : 2};
   }
   const ws = weekMonday(dt);
@@ -914,7 +919,7 @@ function compWindow(m, d){
   const en = new Date(ws); en.setDate(en.getDate() + 11);
   return {start: st, end: en, kind: wd === 6 ? '六' : '日', weeks: wd === 6 ? 4 : 2};
 }
-const fmtMD = dt => (dt.getMonth()+1) + '/' + dt.getDate();
+const fmtMD = dt => (dt.getFullYear() !== AD_YEAR ? (dt.getFullYear() - 1911) + '/' : '') + (dt.getMonth()+1) + '/' + dt.getDate();
 const winText = w => fmtMD(w.start) + '～' + fmtMD(w.end);
 function inWindow(w, m, d){
   const x = dateOf(m,d), wd = x.getDay();
@@ -1013,7 +1018,7 @@ function compsFor(pid, srcM, srcD){
   const tag = srcM + '/' + srcD, out = [];
   const w = compWindow(srcM, srcD);
   const ms = new Set([srcM]);
-  if(w){ ms.add(w.start.getMonth()+1); ms.add(w.end.getMonth()+1); }
+  if(w) [w.start, w.end].forEach(x => { if(x.getFullYear() === AD_YEAR) ms.add(x.getMonth()+1); });   // 跨年部分不在本年度資料內
   ms.forEach(m=>{
     const md = monthDataOf(m); if(!md) return;
     const sh = (md.shifts || {})[pid] || {};
@@ -1638,7 +1643,7 @@ async function openCompPicker(duty){
   const cur = new Date(w.start);
   while(cur <= w.end){
     const m = cur.getMonth()+1, d = cur.getDate();
-    if(inWindow(w, m, d) && !holidayOf(m, d)){
+    if(cur.getFullYear() === AD_YEAR && inWindow(w, m, d) && !holidayOf(m, d)){
       const md = monthDataOf(m);
       const known = !!md;
       const c = known ? (((md.shifts||{})[me]||{})[d] || {am:'',pm:''}) : null;

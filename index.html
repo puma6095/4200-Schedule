@@ -144,7 +144,11 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;bac
 .daylabel em.mt{background:var(--md-primary);border-radius:8px;font-size:9px;letter-spacing:-.3px;padding:2px 3px}
 .daylabel em.dm{background:var(--md-tertiary);border-radius:8px;font-size:9px;letter-spacing:-.3px;padding:2px 3px}
 .daylabel em.dn{background:#C2577A;border-radius:8px;font-size:9px;letter-spacing:-.3px;padding:2px 3px}
-.dn-note{color:#A23E62;font-weight:600}
+.dn-note{color:#A23E62;font-weight:600;white-space:nowrap}
+.nw{white-space:nowrap}
+.evline{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:14px;row-gap:2px}
+.evline .dn-note{font-size:12.5px;background:#FBE9EF;border-radius:var(--shape-full);padding:1px 10px}
+@media (max-width:600px){.evline .dn-note{white-space:normal;border-radius:10px;margin-left:14px}}
 .dayrow.weekend .daylabel span{color:var(--md-error)}
 .slot{display:flex;align-items:center;gap:6px;min-width:0}
 .slot>label{font-size:11px;font-weight:700;color:var(--md-on-surface-variant);flex:none;width:24px}
@@ -447,7 +451,7 @@ const COMP_WINDOWS = {
   '12-19':['11-23','12-18'],   // 週六：四週內
   '12-20':['12-21','116-1-1']  // 週日：二週內（跨年）
 };
-const BUILD  = '2026-11-23a';  // 版本標記：管理頁可看到，回報問題時請附上
+const BUILD  = '2026-11-23b';  // 版本標記：管理頁可看到，回報問題時請附上
 const XLFONT = 'Microsoft JhengHei';
 const MAX_EVENTS  = 12;  // 本月重要活動可輸入的行數上限
 const MIN_ON_DUTY = 8;   // 平日在班人數低於此值即標紅提醒
@@ -873,7 +877,7 @@ function dutyMeetings(){
 }
 /* 晚宴／餐會：活動事項含這些字眼的日期，提醒同仁以「自訂輸入」排兩段班 */
 const DINNER_KEYS  = ['晚宴', '餐會'];
-const TWO_SEG_NOTE = '兩段班：﹝8-12、5-9﹞或﹝1-5、5-9﹞';
+const TWO_SEG_NOTE = '有支援者請務必排兩段班：<span class="nw">﹝8-12、5-9﹞</span>或<span class="nw">﹝1-5、5-9﹞</span>';
 const isDinnerEvent = e => DINNER_KEYS.some(k => e.indexOf(k) >= 0);
 function dinnerDays(){
   const out = [];
@@ -1205,8 +1209,8 @@ function markProgress(){
 }
 function renderEvents(){
   $('#eventList').innerHTML = data.events.length
-    ? data.events.map(e=>`<div>・${e}${isDinnerEvent(e) && e.indexOf('兩段班') < 0
-        ? `　<span class="dn-note">${TWO_SEG_NOTE}</span>` : ''}</div>`).join('')
+    ? data.events.map(e=>`<div class="evline"><span>・${e}</span>${isDinnerEvent(e) && e.indexOf('兩段班') < 0
+        ? `<span class="dn-note">${TWO_SEG_NOTE}</span>` : ''}</div>`).join('')
     : '<span class="hint">（本月尚未輸入活動事項）</span>';
 }
 
